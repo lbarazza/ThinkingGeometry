@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Data — generated artifacts (large, reproducible)
+data/prompts/
+data/responses/
+data/annotations/
+data/generated/
+
+# Results
+results/
+
+# Jupyter / VS Code interactive
+.ipynb_checkpoints/
+*.ipynb
+
+# Visualisation artefacts
+visualize*.json
+
+# macOS
+.DS_Store
