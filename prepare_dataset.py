@@ -1,50 +1,19 @@
-# src/prepare_gsm8k.py
-
 from __future__ import annotations
 
 import argparse
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 from datasets import load_dataset
 
 
-def normalize_answer(answer: str) -> str:
-    """
-    Normalize GSM8K-style numeric answers.
-
-    Examples:
-        "1,234" -> "1234"
-        "$16."  -> "16"
-    """
-    answer = answer.strip()
-    answer = answer.replace(",", "")
-    answer = answer.replace("$", "")
-    answer = answer.rstrip(".")
-    return answer
-
-
-def extract_final_answer(gsm8k_answer: str) -> str:
-    """
-    GSM8K's `answer` field contains reasoning plus the final answer.
-
-    Example:
-        "... Therefore the answer is 16. #### 16"
-
-    This function extracts the part after ####.
-    """
-    if "####" not in gsm8k_answer:
-        raise ValueError(f"No final answer marker found in: {gsm8k_answer}")
-
-    final_answer = gsm8k_answer.split("####")[-1]
-    return normalize_answer(final_answer)
-
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
 def build_prompt(question: str) -> str:
-    """
-    Prompt used for the controlled step-by-step reproduction.
-    """
     return f"""Solve the following math problem step by step.
 
 Use exactly this format, no exceptions:
@@ -58,87 +27,187 @@ Problem: {question}
 """
 
 
-def prepare_gsm8k(
+# ---------------------------------------------------------------------------
+# GSM8K
+# ---------------------------------------------------------------------------
+
+def _normalize_gsm8k_answer(answer: str) -> str:
+    answer = answer.strip()
+    answer = answer.replace(",", "")
+    answer = answer.replace("$", "")
+    answer = answer.rstrip(".")
+    return answer
+
+
+def _extract_gsm8k_final_answer(raw: str) -> str:
+    if "####" not in raw:
+        raise ValueError(f"No final answer marker in: {raw}")
+    return _normalize_gsm8k_answer(raw.split("####")[-1])
+
+
+def build_gsm8k_records(split: str, n_examples: int | None, seed: int) -> list[dict[str, Any]]:
+    dataset = load_dataset("openai/gsm8k", "main", split=split)
+    if n_examples is not None:
+        dataset = dataset.shuffle(seed=seed).select(range(min(n_examples, len(dataset))))
+
+    records = []
+    for i, example in enumerate(dataset):
+        question = example["question"]
+        gold_reasoning = example["answer"]
+        gold_answer = _extract_gsm8k_final_answer(gold_reasoning)
+        records.append({
+            "id": f"gsm8k_{split}_{i:05d}",
+            "dataset": "gsm8k",
+            "split": split,
+            "question": question,
+            "gold_reasoning": gold_reasoning,
+            "gold_answer": gold_answer,
+            "prompt": build_prompt(question),
+        })
+    return records
+
+
+# ---------------------------------------------------------------------------
+# MATH (hendrycks/competition_math)
+# ---------------------------------------------------------------------------
+
+def _extract_boxed_answer(solution: str) -> str:
+    """Extract the last \\boxed{...} from a MATH solution (handles one level of nested braces)."""
+    matches = re.findall(r"\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}", solution)
+    if not matches:
+        raise ValueError(f"No \\boxed{{}} found in: {solution[:120]}")
+    return matches[-1].strip()
+
+
+def build_math_records(
     split: str,
     n_examples: int | None,
     seed: int,
-    output_path: Path,
-) -> None:
-    dataset = load_dataset("openai/gsm8k", "main", split=split)
+    math_levels: list[int] | None = None,
+    math_type: str | None = None,
+) -> list[dict[str, Any]]:
+    dataset = load_dataset("hendrycks/competition_math", split=split)
+
+    # Filter by level ("Level 1" ... "Level 5")
+    if math_levels is not None:
+        level_strs = {f"Level {l}" for l in math_levels}
+        dataset = dataset.filter(lambda ex: ex["level"] in level_strs)
+
+    # Filter by problem type (e.g. "Algebra", "Number Theory")
+    if math_type is not None:
+        dataset = dataset.filter(lambda ex: ex["type"] == math_type)
 
     if n_examples is not None:
         dataset = dataset.shuffle(seed=seed).select(range(min(n_examples, len(dataset))))
 
+    level_tag = "l" + "-".join(str(l) for l in sorted(math_levels)) if math_levels else "all"
+    type_tag = f"_{math_type.lower().replace(' ', '_')}" if math_type else ""
+
+    records = []
+    for i, example in enumerate(dataset):
+        question = example["problem"]
+        solution = example["solution"]
+        try:
+            gold_answer = _extract_boxed_answer(solution)
+        except ValueError:
+            gold_answer = ""
+
+        records.append({
+            "id": f"math_{level_tag}{type_tag}_{split}_{i:05d}",
+            "dataset": "math",
+            "math_level": example["level"],
+            "math_type": example["type"],
+            "split": split,
+            "question": question,
+            "gold_reasoning": solution,
+            "gold_answer": gold_answer,
+            "prompt": build_prompt(question),
+        })
+    return records
+
+
+# ---------------------------------------------------------------------------
+# File writers
+# ---------------------------------------------------------------------------
+
+def write_records(records: list[dict[str, Any]], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
     with output_path.open("w", encoding="utf-8") as f:
-        for i, example in enumerate(dataset):
-            question = example["question"]
-            gold_reasoning = example["answer"]
-            gold_answer = extract_final_answer(gold_reasoning)
-
-            record = {
-                "id": f"gsm8k_{split}_{i:05d}",
-                "dataset": "gsm8k",
-                "split": split,
-                "question": question,
-                "gold_reasoning": gold_reasoning,
-                "gold_answer": gold_answer,
-                "prompt": build_prompt(question),
-            }
-
+        for record in records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    print(f"Wrote {len(records)} examples to {output_path}")
 
-    print(f"Wrote {len(dataset)} examples to {output_path}")
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Prepare GSM8K prompts for Gemma reasoning-trajectory experiments."
+        description="Prepare GSM8K or MATH prompts for Gemma reasoning-trajectory experiments."
     )
-
+    parser.add_argument(
+        "--dataset",
+        choices=["gsm8k", "math"],
+        default="gsm8k",
+        help="Dataset to prepare.",
+    )
     parser.add_argument(
         "--split",
         choices=["train", "test"],
         default="test",
-        help="GSM8K split to use.",
     )
-
     parser.add_argument(
         "--n",
         type=int,
         default=200,
-        help="Number of examples to use. Use -1 for the full split.",
+        help="Number of examples. Use -1 for all.",
     )
-
     parser.add_argument(
         "--seed",
         type=int,
         default=0,
-        help="Random seed for shuffling.",
     )
-
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("data/prompts/gsm8k_test_200.jsonl"),
-        help="Output JSONL path.",
+        default=None,
+        help="Output JSONL path. Defaults to data/prompts/<dataset>_<split>_<n>.jsonl",
     )
-
+    # MATH-specific
+    parser.add_argument(
+        "--math-level",
+        type=int,
+        nargs="+",
+        dest="math_levels",
+        default=None,
+        help="MATH difficulty levels to include (e.g. --math-level 3 4). Default: all.",
+    )
+    parser.add_argument(
+        "--math-type",
+        type=str,
+        default=None,
+        help="MATH problem type to include (e.g. 'Algebra'). Default: all.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-
     n_examples = None if args.n == -1 else args.n
 
-    prepare_gsm8k(
-        split=args.split,
-        n_examples=n_examples,
-        seed=args.seed,
-        output_path=args.out,
-    )
+    if args.dataset == "gsm8k":
+        records = build_gsm8k_records(args.split, n_examples, args.seed)
+        default_out = Path(f"data/prompts/gsm8k_{args.split}_{args.n}.jsonl")
+    else:
+        records = build_math_records(
+            args.split, n_examples, args.seed, args.math_levels, args.math_type
+        )
+        level_tag = "l" + "-".join(str(l) for l in sorted(args.math_levels)) if args.math_levels else "all"
+        default_out = Path(f"data/prompts/math_{level_tag}_{args.split}_{args.n}.jsonl")
+
+    out = args.out or default_out
+    write_records(records, out)
 
 
 if __name__ == "__main__":
