@@ -29,6 +29,11 @@ data/
 results/figures/      # saved plots
 ```
 
+## Environment
+
+- All scripts must be run inside the `thinking-geometry` conda environment, which has all required packages (torch, transformers, numpy, scikit-learn, matplotlib, etc.) installed.
+- Activate with: `conda activate thinking-geometry`
+
 ## Conventions
 
 - Analysis files use `# %%` cell markers (VS Code interactive)
@@ -36,3 +41,11 @@ results/figures/      # saved plots
 - Greedy decoding throughout (`do_sample=False`)
 - Step positions use `manual_step_number` (sequential 0-based index) not the number in the text, to handle non-contiguous or mis-numbered steps; -1 reserved for the final answer marker
 - `full_token_index` is always computed by tokenizing `chat_prompt + model_output` as one string to avoid off-by-one errors from separate tokenizations
+
+## Implementation workflow
+- Before implementing anything, identify any ambiguity in the algorithm,
+  data structures, edge-case handling, or approach.
+- If more than one reasonable implementation exists, STOP and ask me which
+  I want before writing code. Present the options concretely with trade-offs.
+- Do not pick a default and proceed silently. I want to approve the approach.
+- Only skip this when the implementation is genuinely unambiguous.
