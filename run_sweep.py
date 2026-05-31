@@ -270,9 +270,22 @@ if __name__ == "__main__":
         metavar="MINUTES",
         help="Grace period before shutdown when --auto-shutdown is set (default: 2).",
     )
+    parser.add_argument(
+        "--n-examples",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override the number of examples per dataset (default: use the mode's preset).",
+    )
     args = parser.parse_args()
     cfg = CONFIGS[args.mode]
+    combos = cfg["combos"]
+    if args.n_examples is not None:
+        combos = [
+            {**c, "kwargs": {**c["kwargs"], "n_examples": args.n_examples}}
+            for c in combos
+        ]
     print(f"Mode: {args.mode}  |  Model: {cfg['model_config']['model_id']}")
-    run_sweep(cfg["model_config"], cfg["combos"])
+    run_sweep(cfg["model_config"], combos)
     if args.auto_shutdown:
         _auto_shutdown(args.shutdown_delay_minutes)
