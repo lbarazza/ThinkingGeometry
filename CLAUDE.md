@@ -1,22 +1,31 @@
 # ThinkingGeometry
 
-Reproducing "LLM Reasoning as Trajectories" (Sun et al., 2025) on Gemma 4 4B-it.
+Reproducing "LLM Reasoning as Trajectories" (Sun et al., 2025) on Gemma 4.
 
 ## Project
 
-- **Model**: `google/gemma-4-E4B-it` (34 layers, hidden_dim=2560), run on MPS
-- **Dataset**: GSM8K
+- **Models**: `google/gemma-4-E4B-it` (local, MPS) for testing; `google/gemma-4-31b-it` (Hyperbolic GPU) for full runs
+- **Datasets**: GSM8K, MATH (`chiayewken/competition_math`), MATH (`nlile/hendrycks-MATH-benchmark`)
 - **Goal**: Test whether step-specific hidden states form linearly separable regions, and whether correct/incorrect trajectories diverge at late steps
+
+## Branches
+
+- `main` — full pipeline including hidden-state extraction and analysis scripts
+- `remote-gpu` — minimal subset for Hyperbolic GPU instances (generation + evaluation only)
 
 ## Files
 
-- `prepare_dataset.py` — download GSM8K and write prompt JSONL files to `data/prompts/`
-- `generate_gemma.py` — run Gemma on prompts, save responses to `data/responses/gemma4_e4b_it/`; supports resume via existing-ID tracking
-- `generate.py` — earlier generation script (kept for reference)
-- `extract_step_positions.py` — tokenize `chat_prompt + model_output` as one string, find per-step token positions, write annotations to `data/annotations/step_positions/`; each position carries `full_token_index` (index into the concatenated sequence) and `manual_step_number` (0-based sequential order; -1 for the final answer marker)
-- `extract_hidden_states.py` — load model, run forward pass per example, extract residual-stream activations at step-marker token positions for specified layers; filters steps by `manual_step_number`; saves one `.npz` per example (arrays: `activations [S,L,H]`, `manual_step_numbers`, `token_indices`, `layer_indices`) to `data/generated/hidden_states/`
+### Generation & evaluation (both branches)
+- `prepare_dataset.py` — download GSM8K or MATH datasets and write prompt JSONL files to `data/prompts/`; exposes `build_gsm8k_records`, `build_math_records`, `build_nlile_math_records` for programmatic use
+- `generate_gemma.py` — run Gemma on prompts, save responses JSONL; supports resume via existing-ID tracking
+- `run_sweep.py` — batch sweep across datasets with a single model; `--mode local` (E4B, 3 examples) or `--mode full` (31B, 100 examples); saves per-combo `results/responses/<slug>/responses.jsonl` and `results/sweep_summary.json`
+- `eval_responses.py` — evaluate a responses JSONL: accuracy report + sample inspection (`--show-n`, `--show-wrong-only`)
+
+### Extraction & analysis (main only)
+- `extract_step_positions.py` — tokenize `chat_prompt + model_output` as one string, find per-step token positions, write annotations to `data/annotations/step_positions/`; each position carries `full_token_index` and `manual_step_number` (0-based; -1 for final answer marker)
+- `extract_hidden_states.py` — forward pass per example, extract residual-stream activations at step-marker positions for specified layers; saves one `.npz` per example (`activations [S,L,H]`, `manual_step_numbers`, `token_indices`, `layer_indices`) to `data/generated/hidden_states/`
 - `step_separability.py` — linear probes + t-SNE analysis on hidden states
-- `utils.py` — shared helpers (prompt building, data loading)
+- `utils.py` — shared helpers (data loading)
 
 ## Data layout
 
@@ -26,8 +35,17 @@ data/
   responses/          # model outputs (gemma4_e4b_it/)
   annotations/        # step_positions/ from extract_step_positions.py
   generated/          # hidden_states/ (.npz per example)
-results/figures/      # saved plots
+results/
+  responses/          # per-combo response files from run_sweep.py
+  sweep_summary.json  # accuracy table across all combos
+  figures/            # saved plots
 ```
+
+## Datasets
+
+- **GSM8K** (`openai/gsm8k`) — grade school math; gold answer after `####`
+- **MATH chiayewken** (`chiayewken/competition_math`) — competition math, levels 1–5 (string "Level N"), train+test splits; gold answer parsed from `\boxed{}`
+- **MATH nlile** (`nlile/hendrycks-MATH-benchmark`) — same corpus, levels 1–5 (int), pre-extracted `answer` field, train+test splits
 
 ## Environment
 

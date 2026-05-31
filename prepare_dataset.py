@@ -86,7 +86,7 @@ def build_math_records(
     math_levels: list[int] | None = None,
     math_type: str | None = None,
 ) -> list[dict[str, Any]]:
-    dataset = load_dataset("hendrycks/competition_math", split=split)
+    dataset = load_dataset("chiayewken/competition_math", split=split)
 
     # Filter by level ("Level 1" ... "Level 5")
     if math_levels is not None:
@@ -127,6 +127,48 @@ def build_math_records(
 
 
 # ---------------------------------------------------------------------------
+# nlile/hendrycks-MATH-benchmark
+# level is int (1-5), answer is pre-extracted, subject instead of type
+# ---------------------------------------------------------------------------
+
+def build_nlile_math_records(
+    split: str,
+    n_examples: int | None,
+    seed: int,
+    math_levels: list[int] | None = None,
+    math_type: str | None = None,
+) -> list[dict[str, Any]]:
+    dataset = load_dataset("nlile/hendrycks-MATH-benchmark", split=split)
+
+    if math_levels is not None:
+        dataset = dataset.filter(lambda ex: ex["level"] in math_levels)
+
+    if math_type is not None:
+        dataset = dataset.filter(lambda ex: ex["subject"] == math_type)
+
+    if n_examples is not None:
+        dataset = dataset.shuffle(seed=seed).select(range(min(n_examples, len(dataset))))
+
+    level_tag = "l" + "-".join(str(l) for l in sorted(math_levels)) if math_levels else "all"
+    type_tag = f"_{math_type.lower().replace(' ', '_')}" if math_type else ""
+
+    records = []
+    for i, example in enumerate(dataset):
+        records.append({
+            "id": f"nlile_math_{level_tag}{type_tag}_{split}_{i:05d}",
+            "dataset": "nlile_math",
+            "math_level": example["level"],
+            "math_type": example["subject"],
+            "split": split,
+            "question": example["problem"],
+            "gold_reasoning": example["solution"],
+            "gold_answer": example["answer"],
+            "prompt": build_prompt(example["problem"]),
+        })
+    return records
+
+
+# ---------------------------------------------------------------------------
 # File writers
 # ---------------------------------------------------------------------------
 
@@ -148,7 +190,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dataset",
-        choices=["gsm8k", "math"],
+        choices=["gsm8k", "math", "nlile_math"],
         default="gsm8k",
         help="Dataset to prepare.",
     )
@@ -199,12 +241,18 @@ def main() -> None:
     if args.dataset == "gsm8k":
         records = build_gsm8k_records(args.split, n_examples, args.seed)
         default_out = Path(f"data/prompts/gsm8k_{args.split}_{args.n}.jsonl")
-    else:
+    elif args.dataset == "math":
         records = build_math_records(
             args.split, n_examples, args.seed, args.math_levels, args.math_type
         )
         level_tag = "l" + "-".join(str(l) for l in sorted(args.math_levels)) if args.math_levels else "all"
         default_out = Path(f"data/prompts/math_{level_tag}_{args.split}_{args.n}.jsonl")
+    else:
+        records = build_nlile_math_records(
+            args.split, n_examples, args.seed, args.math_levels, args.math_type
+        )
+        level_tag = "l" + "-".join(str(l) for l in sorted(args.math_levels)) if args.math_levels else "all"
+        default_out = Path(f"data/prompts/nlile_math_{level_tag}_{args.split}_{args.n}.jsonl")
 
     out = args.out or default_out
     write_records(records, out)
