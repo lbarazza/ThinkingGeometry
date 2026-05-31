@@ -2,15 +2,17 @@
 Batch sweep: generate responses for multiple datasets with a single model,
 evaluate accuracy on the fly, and save everything to results/.
 
-Edit SWEEP_COMBOS and MODEL_CONFIG at the top to configure the run.
-
 Usage:
-    conda activate thinking-geometry
-    python run_sweep.py
+    python run_sweep.py --mode local   # quick test with gemma-4-E4B-it, 3 examples per dataset
+    python run_sweep.py --mode full    # full run with gemma-4-31b-it, 100 examples per dataset
+    python run_sweep.py --mode full --auto-shutdown              # shut down when done (2 min grace)
+    python run_sweep.py --mode full --auto-shutdown --shutdown-delay-minutes 5
 """
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -18,44 +20,52 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from eval_responses import evaluate_records, normalize_answer
+from eval_responses import evaluate_records
 from generate_gemma import build_chat_prompt, generate_one
-from prepare_dataset import build_gsm8k_records, build_math_records
+from prepare_dataset import build_gsm8k_records, build_math_records, build_nlile_math_records
 
 # ---------------------------------------------------------------------------
-# Configuration — edit here
+# Configs
 # ---------------------------------------------------------------------------
 
-MODEL_CONFIG = {
-    "model_id": "google/gemma-4-31b-it",
-    "device": "auto",   # "auto" detects cuda > mps > cpu
-    "dtype": "bf16",
-    "max_new_tokens": 1024,
-    "thinking": False,
+CONFIGS = {
+    "local": {
+        "model_config": {
+            "model_id": "google/gemma-4-E4B-it",
+            "device": "auto",
+            "dtype": "bf16",
+            "max_new_tokens": 512,
+            "thinking": False,
+        },
+        "combos": [
+            {"slug": "gsm8k_test_3",           "dataset": "gsm8k",      "kwargs": {"split": "test", "n_examples": 3, "seed": 0}},
+            {"slug": "math_l3_test_3",         "dataset": "math",       "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [3]}},
+            {"slug": "math_l4_test_3",         "dataset": "math",       "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [4]}},
+            {"slug": "math_l3-4_test_3",       "dataset": "math",       "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [3, 4]}},
+            {"slug": "nlile_math_l3_test_3",   "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [3]}},
+            {"slug": "nlile_math_l4_test_3",   "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [4]}},
+            {"slug": "nlile_math_l3-4_test_3", "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [3, 4]}},
+        ],
+    },
+    "full": {
+        "model_config": {
+            "model_id": "google/gemma-4-31b-it",
+            "device": "auto",
+            "dtype": "bf16",
+            "max_new_tokens": 2048,
+            "thinking": False,
+        },
+        "combos": [
+            {"slug": "gsm8k_test_100",           "dataset": "gsm8k",      "kwargs": {"split": "test", "n_examples": 100, "seed": 0}},
+            {"slug": "math_l3_test_100",         "dataset": "math",       "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [3]}},
+            {"slug": "math_l4_test_100",         "dataset": "math",       "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [4]}},
+            {"slug": "math_l3-4_test_100",       "dataset": "math",       "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [3, 4]}},
+            {"slug": "nlile_math_l3_test_100",   "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [3]}},
+            {"slug": "nlile_math_l4_test_100",   "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [4]}},
+            {"slug": "nlile_math_l3-4_test_100", "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [3, 4]}},
+        ],
+    },
 }
-
-SWEEP_COMBOS = [
-    {
-        "slug": "gsm8k_test_100",
-        "dataset": "gsm8k",
-        "kwargs": {"split": "test", "n_examples": 100, "seed": 0},
-    },
-    {
-        "slug": "math_l3_test_100",
-        "dataset": "math",
-        "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [3]},
-    },
-    {
-        "slug": "math_l4_test_100",
-        "dataset": "math",
-        "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [4]},
-    },
-    {
-        "slug": "math_l3-4_test_100",
-        "dataset": "math",
-        "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [3, 4]},
-    },
-]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -80,6 +90,8 @@ def load_prompts(dataset: str, kwargs: dict) -> list[dict]:
         return build_gsm8k_records(**kwargs)
     if dataset == "math":
         return build_math_records(**kwargs)
+    if dataset == "nlile_math":
+        return build_nlile_math_records(**kwargs)
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
@@ -87,10 +99,10 @@ def load_prompts(dataset: str, kwargs: dict) -> list[dict]:
 # Main sweep
 # ---------------------------------------------------------------------------
 
-def run_sweep() -> None:
-    device = get_device(MODEL_CONFIG["device"])
-    dtype = get_dtype(MODEL_CONFIG["dtype"])
-    model_id = MODEL_CONFIG["model_id"]
+def run_sweep(model_config: dict, combos: list[dict]) -> None:
+    device = get_device(model_config["device"])
+    dtype = get_dtype(model_config["dtype"])
+    model_id = model_config["model_id"]
 
     print(f"Loading tokenizer: {model_id}")
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -102,7 +114,7 @@ def run_sweep() -> None:
     results_dir = Path("results")
     summary_rows: list[dict] = []
 
-    for combo in SWEEP_COMBOS:
+    for combo in combos:
         slug = combo["slug"]
         print(f"\n{'='*60}")
         print(f"Combo: {slug}")
@@ -137,18 +149,18 @@ def run_sweep() -> None:
                         tokenizer=tokenizer,
                         user_prompt=prompt_rec["prompt"],
                         device=device,
-                        max_new_tokens=MODEL_CONFIG["max_new_tokens"],
-                        enable_thinking=MODEL_CONFIG["thinking"],
+                        max_new_tokens=model_config["max_new_tokens"],
+                        enable_thinking=model_config["thinking"],
                     )
                     output_rec = {
                         **prompt_rec,
                         "model_id": model_id,
                         "device": device,
-                        "dtype": MODEL_CONFIG["dtype"],
-                        "thinking_mode": MODEL_CONFIG["thinking"],
+                        "dtype": model_config["dtype"],
+                        "thinking_mode": model_config["thinking"],
                         "generation_config": {
                             "do_sample": False,
-                            "max_new_tokens": MODEL_CONFIG["max_new_tokens"],
+                            "max_new_tokens": model_config["max_new_tokens"],
                         },
                         **gen,
                         "error": None,
@@ -158,11 +170,11 @@ def run_sweep() -> None:
                         **prompt_rec,
                         "model_id": model_id,
                         "device": device,
-                        "dtype": MODEL_CONFIG["dtype"],
-                        "thinking_mode": MODEL_CONFIG["thinking"],
+                        "dtype": model_config["dtype"],
+                        "thinking_mode": model_config["thinking"],
                         "generation_config": {
                             "do_sample": False,
-                            "max_new_tokens": MODEL_CONFIG["max_new_tokens"],
+                            "max_new_tokens": model_config["max_new_tokens"],
                         },
                         "chat_prompt": None,
                         "model_output": None,
@@ -172,27 +184,20 @@ def run_sweep() -> None:
                         "error": repr(e),
                     }
 
+                output_rec = evaluate_records([output_rec])[0]
                 fout.write(json.dumps(output_rec, ensure_ascii=False) + "\n")
                 fout.flush()
 
-        # Evaluate
-        all_records = existing_records + to_do  # to_do already flushed; reload from file
+        # Tally accuracy across all records (existing + newly generated)
         with out_path.open(encoding="utf-8") as f:
             all_records = [json.loads(l) for l in f if l.strip()]
 
-        results = evaluate_records(all_records)
-        n = len(results)
-        n_correct = sum(r["correct"] for r in results)
-        n_errors = sum(r.get("error") is not None for r in results)
+        n = len(all_records)
+        n_correct = sum(r.get("correct", False) for r in all_records)
+        n_errors = sum(r.get("error") is not None for r in all_records)
         accuracy = round(100 * n_correct / n, 1) if n else 0.0
 
         print(f"  Accuracy: {n_correct}/{n} ({accuracy}%)  Errors: {n_errors}")
-
-        # Write evaluated records back (add correct + extracted_answer fields)
-        eval_path = out_dir / "responses.jsonl"
-        with eval_path.open("w", encoding="utf-8") as f:
-            for r in results:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
         summary_rows.append({
             "model": model_id,
@@ -223,5 +228,51 @@ def run_sweep() -> None:
     print(f"Summary saved to: {summary_path}")
 
 
+def _auto_shutdown(delay_minutes: int) -> None:
+    total_seconds = delay_minutes * 60
+    print("\n" + "!" * 60)
+    print("WARNING: --auto-shutdown is set.")
+    print("The machine will shut down in {} minute(s).".format(delay_minutes))
+    print("Rented GPU instances keep billing until the shutdown completes.")
+    print("Press Ctrl-C to cancel.")
+    print("!" * 60)
+
+    elapsed = 0
+    interval = 30
+    while elapsed < total_seconds:
+        remaining = total_seconds - elapsed
+        print(f"Shutting down in {remaining}s ...  (Ctrl-C to cancel)")
+        time.sleep(min(interval, remaining))
+        elapsed += interval
+
+    print("Shutting down now.")
+    os.system("sudo shutdown -h now")
+
+
 if __name__ == "__main__":
-    run_sweep()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--mode",
+        choices=["local", "full"],
+        default="local",
+        help="'local' = quick test with E4B model (3 examples); 'full' = 31B model (100 examples).",
+    )
+    parser.add_argument(
+        "--auto-shutdown",
+        action="store_true",
+        default=False,
+        help="Shut down the machine after the sweep completes (Linux only). Default: off.",
+    )
+    parser.add_argument(
+        "--shutdown-delay-minutes",
+        type=int,
+        default=2,
+        metavar="MINUTES",
+        help="Grace period before shutdown when --auto-shutdown is set (default: 2).",
+    )
+    args = parser.parse_args()
+    cfg = CONFIGS[args.mode]
+    print(f"Mode: {args.mode}  |  Model: {cfg['model_config']['model_id']}")
+    run_sweep(cfg["model_config"], cfg["combos"])
+    if args.auto_shutdown:
+        _auto_shutdown(args.shutdown_delay_minutes)
