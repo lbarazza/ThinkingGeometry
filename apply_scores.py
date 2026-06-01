@@ -1,8 +1,9 @@
 """
-Apply LLM scores back to a responses JSONL.
+Apply LLM scores to a responses JSONL, writing a new *_scored.jsonl file.
 
-Reads a scored.jsonl (id + correct) and updates the correct field
-in the original responses JSONL in-place.
+Reads scored.jsonl (id + correct) and writes a new file alongside the original
+with '_scored' appended to the stem (e.g. responses_scored.jsonl). The original
+file is never modified.
 
 Usage:
     python apply_scores.py --responses results/responses/omni_math_l7-8_test_100/responses.jsonl \
@@ -38,19 +39,21 @@ def main() -> None:
             if line.strip():
                 records.append(json.loads(line))
 
+    out_path = args.responses.parent / (args.responses.stem + "_scored" + args.responses.suffix)
+
     updated = 0
     for rec in records:
         if rec["id"] in scores:
             rec["correct"] = scores[rec["id"]]
             updated += 1
 
-    with args.responses.open("w", encoding="utf-8") as f:
+    with out_path.open("w", encoding="utf-8") as f:
         for rec in records:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     n_correct = sum(r.get("correct") is True for r in records)
     n_total = len(records)
-    print(f"Updated {updated} records in {args.responses}")
+    print(f"Written {updated} scored records to {out_path}")
     print(f"Accuracy: {n_correct}/{n_total} ({100 * n_correct / n_total:.1f}%)" if n_total else "")
 
 
