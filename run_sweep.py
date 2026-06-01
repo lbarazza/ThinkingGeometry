@@ -50,7 +50,7 @@ CONFIGS = {
             "thinking": False,
         },
         "combos": [
-            {"slug": "omni_math_l7-8_test_700", "dataset": "omni_math", "kwargs": {"split": "test", "n_examples": 700, "seed": 0, "difficulty_min": 7.0, "difficulty_max": 8.0}},
+            {"slug": "omni_math_l7-8_test_500", "dataset": "omni_math", "kwargs": {"split": "test", "n_examples": 500, "seed": 0, "difficulty_min": 7.0, "difficulty_max": 8.0}},
         ],
     },
 }
@@ -171,6 +171,8 @@ def run_sweep(model_config: dict, combos: list[dict]) -> None:
                         "num_prompt_tokens": None,
                         "num_output_tokens": None,
                         "generation_time_seconds": None,
+                        "prompt_token_ids": None,
+                        "output_token_ids": None,
                         "error": repr(e),
                     }
 

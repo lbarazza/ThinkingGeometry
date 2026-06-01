@@ -125,6 +125,8 @@ def generate_one(
         "num_prompt_tokens": int(input_len),
         "num_output_tokens": int(generated_ids.shape[0]),
         "generation_time_seconds": elapsed,
+        "prompt_token_ids": output_ids[0][:input_len].tolist(),
+        "output_token_ids": generated_ids.tolist(),
     }
 
 
@@ -283,6 +285,8 @@ def main() -> None:
                     "num_prompt_tokens": None,
                     "num_output_tokens": None,
                     "generation_time_seconds": None,
+                    "prompt_token_ids": None,
+                    "output_token_ids": None,
                     "error": repr(e),
                 }
 
