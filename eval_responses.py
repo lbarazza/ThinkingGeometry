@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-FINAL_ANSWER_RE = re.compile(r"####\s*final\s+answer", re.IGNORECASE)
+FINAL_ANSWER_RE = re.compile(r"####")
 
 
 def normalize_answer(answer: str) -> str:
@@ -23,7 +23,7 @@ def normalize_answer(answer: str) -> str:
 
 
 def extract_model_answer(model_output: str) -> str:
-    """Return the normalized answer extracted after '#### final answer', or '' if not found."""
+    """Return the normalized answer extracted after '####', or '' if not found."""
     if model_output is None:
         return ""
     parts = FINAL_ANSWER_RE.split(model_output, maxsplit=1)

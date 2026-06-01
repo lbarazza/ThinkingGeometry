@@ -14,16 +14,15 @@ from datasets import load_dataset
 # ---------------------------------------------------------------------------
 
 def build_prompt(question: str) -> str:
-    return f"""Solve the following math problem step by step.
+    return f"""You are a helpful assistant that solves problems step by step with each step signified by "Step [step_number]: ".
+Always provide your final answer after #### at the end.
 
-Use exactly this format, no exceptions:
-Step 1: ...
-Step 2: ...
-Step 3: ...
-...
-#### final answer
+Question: {question}
 
-Problem: {question}
+Please solve this step by step, putting each step after "Step [step_number]: " and always provide your final answer after ####.
+
+Solution:
+
 """
 
 
