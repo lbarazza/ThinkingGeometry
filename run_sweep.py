@@ -50,7 +50,7 @@ CONFIGS = {
             "thinking": False,
         },
         "combos": [
-            {"slug": "omni_math_l7-8_test_100", "dataset": "omni_math", "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "difficulty_min": 7.0, "difficulty_max": 8.0}},
+            {"slug": "omni_math_l7-8_test_700", "dataset": "omni_math", "kwargs": {"split": "test", "n_examples": 700, "seed": 0, "difficulty_min": 7.0, "difficulty_max": 8.0}},
         ],
     },
 }
