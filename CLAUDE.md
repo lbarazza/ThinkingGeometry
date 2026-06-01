@@ -60,6 +60,19 @@ results/
 - Step positions use `manual_step_number` (sequential 0-based index) not the number in the text, to handle non-contiguous or mis-numbered steps; -1 reserved for the final answer marker
 - `full_token_index` is always computed by tokenizing `chat_prompt + model_output` as one string to avoid off-by-one errors from separate tokenizations
 
+## Answer scoring workflow
+
+Because gold answers are raw LaTeX and model answers vary in format, string-match scoring is unreliable. Use the `/score` skill instead.
+
+**Run scoring:**
+```
+/score results/responses/<slug>/responses.jsonl
+```
+
+This spawns a fresh Claude Sonnet 4.6 subagent per record to judge equivalence. Each subagent sees only the question, gold_answer, and extracted_answer for that one record — no access to the responses file directly, and no context pollution from other records. Results are written incrementally to `scored.jsonl` alongside the responses file and resume automatically if interrupted. Once all records are scored, `apply_scores.py` is run automatically and accuracy is printed.
+
+Records with empty `extracted_answer` are never scored and remain `null`.
+
 ## Implementation workflow
 - Before implementing anything, identify any ambiguity in the algorithm,
   data structures, edge-case handling, or approach.
