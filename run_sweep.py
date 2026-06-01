@@ -4,7 +4,7 @@ evaluate accuracy on the fly, and save everything to results/.
 
 Usage:
     python run_sweep.py --mode local   # quick test with gemma-4-E4B-it, 3 examples per dataset
-    python run_sweep.py --mode full    # full run with gemma-4-31b-it, 100 examples per dataset
+    python run_sweep.py --mode full    # full run with gemma-4-31B-it, 100 examples per dataset
     python run_sweep.py --mode full --auto-shutdown              # shut down when done (2 min grace)
     python run_sweep.py --mode full --auto-shutdown --shutdown-delay-minutes 5
 """
@@ -49,7 +49,7 @@ CONFIGS = {
     },
     "full": {
         "model_config": {
-            "model_id": "google/gemma-4-31b-it",
+            "model_id": "google/gemma-4-31B-it",
             "device": "auto",
             "dtype": "bf16",
             "max_new_tokens": 2048,
