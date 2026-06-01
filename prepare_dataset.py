@@ -9,6 +9,7 @@ from typing import Any
 from datasets import load_dataset
 
 
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -168,6 +169,45 @@ def build_nlile_math_records(
 
 
 # ---------------------------------------------------------------------------
+# Omni-MATH (KbsdJames/Omni-MATH)
+# difficulty is a float ~1–10; split is typically "train" (single split)
+# ---------------------------------------------------------------------------
+
+def build_omni_math_records(
+    split: str,
+    n_examples: int | None,
+    seed: int,
+    difficulty_min: float = 7.0,
+    difficulty_max: float = 8.0,
+) -> list[dict[str, Any]]:
+    dataset = load_dataset("KbsdJames/Omni-MATH", split=split)
+
+    dataset = dataset.filter(
+        lambda ex: difficulty_min <= float(ex["difficulty"]) < difficulty_max
+    )
+
+    if n_examples is not None:
+        dataset = dataset.shuffle(seed=seed).select(range(min(n_examples, len(dataset))))
+
+    level_tag = f"l{int(difficulty_min)}-{int(difficulty_max)}"
+
+    records = []
+    for i, example in enumerate(dataset):
+        records.append({
+            "id": f"omni_math_{level_tag}_{split}_{i:05d}",
+            "dataset": "omni_math",
+            "difficulty": example["difficulty"],
+            "source": example.get("source", ""),
+            "split": split,
+            "question": example["problem"],
+            "gold_reasoning": example.get("solution", ""),
+            "gold_answer": example.get("answer", ""),
+            "prompt": build_prompt(example["problem"]),
+        })
+    return records
+
+
+# ---------------------------------------------------------------------------
 # File writers
 # ---------------------------------------------------------------------------
 
@@ -189,7 +229,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dataset",
-        choices=["gsm8k", "math", "nlile_math"],
+        choices=["gsm8k", "math", "nlile_math", "omni_math"],
         default="gsm8k",
         help="Dataset to prepare.",
     )
@@ -230,6 +270,21 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="MATH problem type to include (e.g. 'Algebra'). Default: all.",
     )
+    # Omni-MATH-specific
+    parser.add_argument(
+        "--omni-difficulty-min",
+        type=float,
+        default=7.0,
+        dest="omni_difficulty_min",
+        help="Omni-MATH difficulty lower bound (inclusive). Default: 7.0.",
+    )
+    parser.add_argument(
+        "--omni-difficulty-max",
+        type=float,
+        default=8.0,
+        dest="omni_difficulty_max",
+        help="Omni-MATH difficulty upper bound (exclusive). Default: 8.0.",
+    )
     return parser.parse_args()
 
 
@@ -246,12 +301,18 @@ def main() -> None:
         )
         level_tag = "l" + "-".join(str(l) for l in sorted(args.math_levels)) if args.math_levels else "all"
         default_out = Path(f"data/prompts/math_{level_tag}_{args.split}_{args.n}.jsonl")
-    else:
+    elif args.dataset == "nlile_math":
         records = build_nlile_math_records(
             args.split, n_examples, args.seed, args.math_levels, args.math_type
         )
         level_tag = "l" + "-".join(str(l) for l in sorted(args.math_levels)) if args.math_levels else "all"
         default_out = Path(f"data/prompts/nlile_math_{level_tag}_{args.split}_{args.n}.jsonl")
+    else:
+        records = build_omni_math_records(
+            args.split, n_examples, args.seed, args.omni_difficulty_min, args.omni_difficulty_max
+        )
+        level_tag = f"l{int(args.omni_difficulty_min)}-{int(args.omni_difficulty_max)}"
+        default_out = Path(f"data/prompts/omni_math_{level_tag}_{args.split}_{args.n}.jsonl")
 
     out = args.out or default_out
     write_records(records, out)

@@ -22,7 +22,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from eval_responses import evaluate_records
 from generate_gemma import build_chat_prompt, generate_one
-from prepare_dataset import build_gsm8k_records, build_math_records, build_nlile_math_records
+from prepare_dataset import build_gsm8k_records, build_math_records, build_nlile_math_records, build_omni_math_records
 
 # ---------------------------------------------------------------------------
 # Configs
@@ -38,13 +38,7 @@ CONFIGS = {
             "thinking": False,
         },
         "combos": [
-            {"slug": "gsm8k_test_3",           "dataset": "gsm8k",      "kwargs": {"split": "test", "n_examples": 3, "seed": 0}},
-            {"slug": "math_l3_test_3",         "dataset": "math",       "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [3]}},
-            {"slug": "math_l4_test_3",         "dataset": "math",       "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [4]}},
-            {"slug": "math_l3-4_test_3",       "dataset": "math",       "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [3, 4]}},
-            {"slug": "nlile_math_l3_test_3",   "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [3]}},
-            {"slug": "nlile_math_l4_test_3",   "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [4]}},
-            {"slug": "nlile_math_l3-4_test_3", "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "math_levels": [3, 4]}},
+            {"slug": "omni_math_l7-8_test_3", "dataset": "omni_math", "kwargs": {"split": "test", "n_examples": 3, "seed": 0, "difficulty_min": 7.0, "difficulty_max": 8.0}},
         ],
     },
     "full": {
@@ -56,13 +50,7 @@ CONFIGS = {
             "thinking": False,
         },
         "combos": [
-            {"slug": "gsm8k_test_100",           "dataset": "gsm8k",      "kwargs": {"split": "test", "n_examples": 100, "seed": 0}},
-            {"slug": "math_l3_test_100",         "dataset": "math",       "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [3]}},
-            {"slug": "math_l4_test_100",         "dataset": "math",       "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [4]}},
-            {"slug": "math_l3-4_test_100",       "dataset": "math",       "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [3, 4]}},
-            {"slug": "nlile_math_l3_test_100",   "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [3]}},
-            {"slug": "nlile_math_l4_test_100",   "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [4]}},
-            {"slug": "nlile_math_l3-4_test_100", "dataset": "nlile_math", "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "math_levels": [3, 4]}},
+            {"slug": "omni_math_l7-8_test_100", "dataset": "omni_math", "kwargs": {"split": "test", "n_examples": 100, "seed": 0, "difficulty_min": 7.0, "difficulty_max": 8.0}},
         ],
     },
 }
@@ -92,6 +80,8 @@ def load_prompts(dataset: str, kwargs: dict) -> list[dict]:
         return build_math_records(**kwargs)
     if dataset == "nlile_math":
         return build_nlile_math_records(**kwargs)
+    if dataset == "omni_math":
+        return build_omni_math_records(**kwargs)
     raise ValueError(f"Unknown dataset: {dataset}")
 
 
@@ -188,23 +178,21 @@ def run_sweep(model_config: dict, combos: list[dict]) -> None:
                 fout.write(json.dumps(output_rec, ensure_ascii=False) + "\n")
                 fout.flush()
 
-        # Tally accuracy across all records (existing + newly generated)
+        # Tally across all records (existing + newly generated)
         with out_path.open(encoding="utf-8") as f:
             all_records = [json.loads(l) for l in f if l.strip()]
 
         n = len(all_records)
-        n_correct = sum(r.get("correct", False) for r in all_records)
+        n_no_answer = sum(r.get("extracted_answer", "") == "" for r in all_records)
         n_errors = sum(r.get("error") is not None for r in all_records)
-        accuracy = round(100 * n_correct / n, 1) if n else 0.0
 
-        print(f"  Accuracy: {n_correct}/{n} ({accuracy}%)  Errors: {n_errors}")
+        print(f"  Total: {n}  No answer: {n_no_answer}  Errors: {n_errors}")
 
         summary_rows.append({
             "model": model_id,
             "dataset_slug": slug,
             "n": n,
-            "n_correct": n_correct,
-            "accuracy_pct": accuracy,
+            "n_no_answer": n_no_answer,
             "n_errors": n_errors,
         })
 
@@ -213,16 +201,16 @@ def run_sweep(model_config: dict, combos: list[dict]) -> None:
     with summary_path.open("w", encoding="utf-8") as f:
         json.dump(summary_rows, f, indent=2)
 
-    # Print markdown table
+    # Print summary table
     print(f"\n{'='*60}")
     print("SWEEP SUMMARY")
     print(f"{'='*60}")
-    print(f"{'model':<22} {'dataset':<25} {'n':>5} {'accuracy':>10} {'errors':>7}")
-    print("-" * 72)
+    print(f"{'model':<22} {'dataset':<28} {'n':>5} {'no_answer':>10} {'errors':>7}")
+    print("-" * 74)
     for row in summary_rows:
         print(
-            f"{row['model']:<22} {row['dataset_slug']:<25} {row['n']:>5} "
-            f"{row['accuracy_pct']:>9.1f}% {row['n_errors']:>7}"
+            f"{row['model']:<22} {row['dataset_slug']:<28} {row['n']:>5} "
+            f"{row['n_no_answer']:>10} {row['n_errors']:>7}"
         )
     print(f"\nFull results saved to: {results_dir}/")
     print(f"Summary saved to: {summary_path}")
