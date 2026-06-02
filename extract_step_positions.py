@@ -49,6 +49,11 @@ def process_record(record, tokenizer):
 
     # Character offset where the output section begins (skip prompt)
     n_prompt = len(prompt_ids)
+
+    # Last non-whitespace token of the prompt (manual_step_number=-2)
+    prompt_target = last_nonws_token_before(n_prompt, full_ids, tokenizer)
+    if prompt_target is not None:
+        steps.append({"manual_step_number": -2, "full_token_index": prompt_target})
     output_char_start = offset_map[n_prompt][0] if n_prompt < len(offset_map) else len(full_text)
 
     # Step N: markers — first occurrence of each N, within output only

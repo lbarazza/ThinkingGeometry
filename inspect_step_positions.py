@@ -35,14 +35,20 @@ def print_sample(rid, ann, resp, tokenizer, show_prompt=False):
 
     if show_prompt:
         for i, tid in enumerate(resp["prompt_token_ids"]):
-            parts.append(f"{CYAN}{tokenizer.decode([tid])}{RESET}")
+            text = tokenizer.decode([tid])
+            if i in targets:
+                step_num = targets[i]
+                label = "prompt" if step_num == -2 else "final" if step_num == -1 else f"step{step_num}"
+                parts.append(f"{YELLOW}[{label}: {repr(text)[1:-1]}]{RESET}")
+            else:
+                parts.append(f"{CYAN}{text}{RESET}")
 
     for i, tid in enumerate(output_ids):
         abs_idx = n_prompt + i
         text = tokenizer.decode([tid])
         if abs_idx in targets:
             step_num = targets[abs_idx]
-            label = "final" if step_num == -1 else f"step{step_num}"
+            label = "prompt" if step_num == -2 else "final" if step_num == -1 else f"step{step_num}"
             parts.append(f"{YELLOW}[{label}: {repr(text)[1:-1]}]{RESET}")
         else:
             parts.append(text)
