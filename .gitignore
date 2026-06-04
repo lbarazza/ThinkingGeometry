@@ -9,7 +9,6 @@ env/
 # Data — generated artifacts (large, reproducible)
 data/prompts/
 data/responses/
-data/annotations/
 data/generated/
 
 # Results

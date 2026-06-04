@@ -13,10 +13,12 @@ from pathlib import Path
 
 from transformers import AutoTokenizer
 
-RESET  = "\033[0m"
-BOLD   = "\033[1m"
-YELLOW = "\033[1;93m"
-CYAN   = "\033[1;96m"
+RESET    = "\033[0m"
+BOLD     = "\033[1m"
+YELLOW   = "\033[1;93m"
+CYAN     = "\033[1;96m"
+PINK     = "\033[38;5;219m"
+BG_FUCHSIA = "\033[48;5;129m"
 
 
 def print_sample(rid, ann, resp, tokenizer, show_prompt=False):
@@ -39,7 +41,7 @@ def print_sample(rid, ann, resp, tokenizer, show_prompt=False):
             if i in targets:
                 step_num = targets[i]
                 label = "prompt" if step_num == -2 else "final" if step_num == -1 else f"step{step_num}"
-                parts.append(f"{YELLOW}[{label}: {repr(text)[1:-1]}]{RESET}")
+                parts.append(f"{YELLOW}[{label}: {BG_FUCHSIA}{BOLD}{PINK}{repr(text)[1:-1]}{RESET}{YELLOW}]{RESET}")
             else:
                 parts.append(f"{CYAN}{text}{RESET}")
 
@@ -49,7 +51,7 @@ def print_sample(rid, ann, resp, tokenizer, show_prompt=False):
         if abs_idx in targets:
             step_num = targets[abs_idx]
             label = "prompt" if step_num == -2 else "final" if step_num == -1 else f"step{step_num}"
-            parts.append(f"{YELLOW}[{label}: {repr(text)[1:-1]}]{RESET}")
+            parts.append(f"{YELLOW}[{label}: {BG_FUCHSIA}{BOLD}{PINK}{repr(text)[1:-1]}{RESET}{YELLOW}]{RESET}")
         else:
             parts.append(text)
 
