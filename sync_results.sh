@@ -25,23 +25,24 @@
 
 set -euo pipefail
 
-REMOTE="${1:?Usage: $0 <user@host:/path/to/project> [local_dir] [interval_secs] [ssh_opts]}"
+REMOTE="${1:?Usage: $0 <user@host:/path/to/project> [local_dir] [interval_secs] [ssh_opts] [remote_folder]}"
 LOCAL_DIR="${2:-./remote_results}"
 INTERVAL="${3:-60}"
 SSH_OPTS="${4:-}"
+REMOTE_FOLDER="${5:-results}"
 
 mkdir -p "$LOCAL_DIR"
 
-echo "Syncing  $REMOTE/results/  ->  $LOCAL_DIR/"
+echo "Syncing  $REMOTE/$REMOTE_FOLDER/  ->  $LOCAL_DIR/"
 echo "Interval: ${INTERVAL}s   (Ctrl-C to stop)"
 echo
 
 while true; do
     echo "[$(date '+%H:%M:%S')] syncing..."
     if [ -n "$SSH_OPTS" ]; then
-        rsync -avz --progress -e "ssh $SSH_OPTS" "$REMOTE/results/" "$LOCAL_DIR/"
+        rsync -avz --progress -e "ssh $SSH_OPTS" "$REMOTE/$REMOTE_FOLDER/" "$LOCAL_DIR/"
     else
-        rsync -avz --progress "$REMOTE/results/" "$LOCAL_DIR/"
+        rsync -avz --progress "$REMOTE/$REMOTE_FOLDER/" "$LOCAL_DIR/"
     fi
     echo "[$(date '+%H:%M:%S')] done. Next sync in ${INTERVAL}s."
     sleep "$INTERVAL"
